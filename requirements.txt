@@ -7,3 +7,7 @@ openpyxl
 pymupdf
 easyocr
 pillow
+numpy
+faiss-cpu
+sentence-transformers
+scikit-learn
