@@ -16,16 +16,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 st.set_page_config(page_title="AI Data Analyst using RAG", layout="wide")
 
 # ── API ────────────────────────────────────────────────────────────────────────
-# Key is loaded from Streamlit secrets (Cloud) or environment variable (local dev).
-# Never hardcode secrets here — add TOGETHER_API_KEY to .streamlit/secrets.toml locally
-# or to App Settings → Secrets on Streamlit Cloud.
-TOGETHER_API_KEY = st.secrets.get("TOGETHER_API_KEY", None) or os.environ.get("TOGETHER_API_KEY", "")
-if not TOGETHER_API_KEY:
-    st.error(
-        "⚠️ TOGETHER_API_KEY is not set. "
-        "Add it to `.streamlit/secrets.toml` (local) or App Secrets (Streamlit Cloud)."
-    )
-    st.stop()
+TOGETHER_API_KEY = "0357f4e3014d4d9183adb943e8d0aa0fe146034c20a12e408bd6a0ee748d45fe"
 client = together.Together(api_key=TOGETHER_API_KEY)
 
 # ── Session-state for evaluation log ──────────────────────────────────────────
