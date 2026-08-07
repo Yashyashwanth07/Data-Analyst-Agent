@@ -31,12 +31,11 @@ if "chat_history" not in st.session_state:
 def load_embedder():
     return SentenceTransformer("all-MiniLM-L6-v2")
 
-@st.cache_resource
-def load_ocr():
-    return easyocr.Reader(['en'])
+embedder = load_embedder()
 
-embedder  = load_embedder()
-ocr_reader = load_ocr()
+# NOTE: EasyOCR is loaded lazily inside read_image() to save RAM on startup.
+# Streamlit Cloud free tier has only 1GB RAM — loading both OCR + sentence
+# transformer at boot causes memory crashes when no image is being processed.
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FILE READERS
@@ -67,8 +66,11 @@ def read_pdf(f):
     return text
 
 def read_image(f):
+    @st.cache_resource
+    def load_ocr():
+        return easyocr.Reader(['en'])
     img_bytes = f.read()
-    results   = ocr_reader.readtext(img_bytes)
+    results   = load_ocr().readtext(img_bytes)
     return "\n".join(r[1] for r in results) or "[No text detected]"
 
 def process_upload(uploaded_file):
