@@ -19,9 +19,12 @@ st.set_page_config(page_title="AI Data Analyst using RAG", layout="wide")
 TOGETHER_API_KEY = "0357f4e3014d4d9183adb943e8d0aa0fe146034c20a12e408bd6a0ee748d45fe"
 client = together.Together(api_key=TOGETHER_API_KEY)
 
-# ── Session-state for evaluation log ──────────────────────────────────────────
+# ── Session-state ────────────────────────────────────────────────────────────
 if "eval_log" not in st.session_state:
-    st.session_state.eval_log = []          
+    st.session_state.eval_log = []
+if "chat_history" not in st.session_state:
+    # Each entry: {"role": "user"|"assistant", "content": str, "metrics": dict|None}
+    st.session_state.chat_history = []
     
 # ── Cached resources ──────────────────────────────────────────────────────────
 @st.cache_resource
@@ -431,24 +434,111 @@ if uploaded:
                               help="Fraction of chunks ending with sentence-terminal punctuation")
 
 # ══════════════════════════════════════════════════════════════════════════════
+# CHAT HISTORY STYLES
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown("""
+<style>
+.chat-wrapper { display: flex; flex-direction: column; gap: 12px; margin-bottom: 8px; }
+.chat-bubble {
+    padding: 12px 16px;
+    border-radius: 16px;
+    max-width: 80%;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    word-wrap: break-word;
+}
+.user-row   { display: flex; justify-content: flex-end; }
+.ai-row     { display: flex; justify-content: flex-start; }
+.user-bubble {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: white;
+    border-bottom-right-radius: 4px;
+}
+.ai-bubble {
+    background: #f0f2f6;
+    color: #1a1a2e;
+    border-bottom-left-radius: 4px;
+    border: 1px solid #e0e0e0;
+}
+.bubble-label {
+    font-size: 0.75rem;
+    color: #888;
+    margin-bottom: 3px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
 # QUESTION & ANSWER
 # ══════════════════════════════════════════════════════════════════════════════
 st.divider()
-st.header("Ask a Question")
 
-query = st.text_input("Enter your question")
+chat_header_col, clear_col = st.columns([5, 1])
+chat_header_col.header("💬 Chat with your Data")
+if clear_col.button("🗑️ Clear Chat", use_container_width=True):
+    st.session_state.chat_history = []
+    st.session_state.eval_log = []
+    st.rerun()
 
-if st.button("Ask") and query:
+# ── Render full chat history ───────────────────────────────────────────────────
+if st.session_state.chat_history:
+    st.markdown('<div class="chat-wrapper">', unsafe_allow_html=True)
+    for msg in st.session_state.chat_history:
+        if msg["role"] == "user":
+            st.markdown(
+                f'<div class="user-row">'
+                f'<div>'
+                f'<div class="bubble-label" style="text-align:right">You</div>'
+                f'<div class="chat-bubble user-bubble">{msg["content"]}</div>'
+                f'</div></div>',
+                unsafe_allow_html=True
+            )
+        else:
+            metrics = msg.get("metrics")
+            metrics_html = ""
+            if metrics:
+                metrics_html = (
+                    f'<div style="font-size:0.75rem;color:#888;margin-top:8px;">'
+                    f'Faithfulness: <b>{metrics["faithfulness"]:.0%}</b> · '
+                    f'Relevance: <b>{metrics["answer_relevance"]:.0%}</b> · '
+                    f'Latency: <b>{metrics["llm_latency_ms"]} ms</b>'
+                    f'</div>'
+                )
+            st.markdown(
+                f'<div class="ai-row">'
+                f'<div>'
+                f'<div class="bubble-label">🤖 AI Analyst</div>'
+                f'<div class="chat-bubble ai-bubble">{msg["content"]}{metrics_html}</div>'
+                f'</div></div>',
+                unsafe_allow_html=True
+            )
+    st.markdown('</div>', unsafe_allow_html=True)
+else:
+    st.info("Upload a file above, then ask your first question below!")
+
+# ── Input row ─────────────────────────────────────────────────────────────────
+input_col, btn_col = st.columns([5, 1])
+query = input_col.text_input(
+    "Ask a question about your data…",
+    placeholder="e.g. What is the average sales by region?",
+    label_visibility="collapsed"
+)
+ask_clicked = btn_col.button("Ask ➤", use_container_width=True)
+
+if ask_clicked and query:
+    if data_df is None and not data_text:
+        st.warning("⚠️ Upload a file first.")
+        st.stop()
+
+    # ── Add user message to history ───────────────────────────────────────────
+    st.session_state.chat_history.append({"role": "user", "content": query})
 
     if data_df is not None:
-        # ── Tabular path: direct context, no FAISS ────────────────────────────
+        # ── Tabular path ──────────────────────────────────────────────────────
         context = data_df.to_string(index=False)
-
         with st.spinner("Generating answer…"):
             answer, llm_lat = llama_query(query, context)
-
-        # Minimal generation metrics for tabular path (no retrieved chunks)
-        fake_chunks = [context[:800]]          # treat truncated context as single chunk
+        fake_chunks = [context[:800]]
         gen_m = generation_metrics(query, answer, fake_chunks, llm_lat)
         ret_m = {
             "faiss_latency_ms": 0,
@@ -459,7 +549,7 @@ if st.button("Ask") and query:
             "mrr":              0,
         }
 
-    elif data_text:
+    else:
         # ── RAG path ──────────────────────────────────────────────────────────
         with st.spinner("Retrieving & generating…"):
             context, ret_m, retrieved = retrieve_top_k(
@@ -468,38 +558,24 @@ if st.button("Ask") and query:
             answer, llm_lat = llama_query(query, context)
             gen_m = generation_metrics(query, answer, retrieved, llm_lat)
 
-    else:
-        st.warning("Upload a file first"); st.stop()
-
-    # ── Store in log ──────────────────────────────────────────────────────────
-    st.session_state.eval_log.append({
-        "query":      query,
-        "answer":     answer,
-        "retrieval":  ret_m,
-        "generation": gen_m,
-        "data_quality": dq_stats if dq_stats else {},
-        "chunking":   chunk_stats if chunk_stats else {},
+    # ── Add AI message to history ─────────────────────────────────────────────
+    st.session_state.chat_history.append({
+        "role":    "assistant",
+        "content": answer,
+        "metrics": gen_m,
     })
 
-    # ── Display answer ────────────────────────────────────────────────────────
-    st.subheader("Answer")
-    st.write(answer)
+    # ── Store in eval log ─────────────────────────────────────────────────────
+    st.session_state.eval_log.append({
+        "query":        query,
+        "answer":       answer,
+        "retrieval":    ret_m,
+        "generation":   gen_m,
+        "data_quality": dq_stats if dq_stats else {},
+        "chunking":     chunk_stats if chunk_stats else {},
+    })
 
-    # ── Inline quick metrics ──────────────────────────────────────────────────
-    qm_cols = st.columns(3)
-    qm_cols[0].metric("Faithfulness",     f"{gen_m['faithfulness']:.2%}")
-    qm_cols[1].metric("Answer Relevance", f"{gen_m['answer_relevance']:.2%}")
-    qm_cols[2].metric("LLM Latency",      f"{gen_m['llm_latency_ms']} ms")
-
-    # ── UX feedback ───────────────────────────────────────────────────────────
-    st.markdown("**Was this answer helpful?**")
-    fb_cols = st.columns([1, 1, 8])
-    if fb_cols[0].button("👍"):
-        st.session_state.eval_log[-1]["feedback"] = "positive"
-        st.success("Thanks for your feedback!")
-    if fb_cols[1].button("👎"):
-        st.session_state.eval_log[-1]["feedback"] = "negative"
-        st.warning("Thanks — we'll use this to improve.")
+    st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # EVALUATION DASHBOARD (always visible once a query has been made)
