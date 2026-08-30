@@ -15,9 +15,43 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 st.set_page_config(page_title="AI Data Analyst using RAG", layout="wide")
 
-# ── API ────────────────────────────────────────────────────────────────────────
-TOGETHER_API_KEY = "0357f4e3014d4d9183adb943e8d0aa0fe146034c20a12e408bd6a0ee748d45fe"
-client = together.Together(api_key=TOGETHER_API_KEY)
+# ── Sidebar: Model & API Configuration ────────────────────────────────────────
+with st.sidebar:
+    st.header("⚙️ Configuration")
+    
+    default_key = os.environ.get("TOGETHER_API_KEY", "")
+    if not default_key:
+        try:
+            default_key = st.secrets.get("TOGETHER_API_KEY", "")
+        except Exception:
+            default_key = ""
+    if not default_key:
+        default_key = "0357f4e3014d4d9183adb943e8d0aa0fe146034c20a12e408bd6a0ee748d45fe"
+    
+    api_key_input = st.text_input(
+        "Together AI API Key",
+        value=default_key,
+        type="password",
+        help="Get a free key at https://api.together.ai"
+    )
+    
+    model_options = [
+        "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+        "mistralai/Mistral-7B-Instruct-v0.3",
+        "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
+    ]
+    selected_model = st.selectbox(
+        "LLM Model",
+        options=model_options,
+        index=0
+    )
+    
+    st.markdown("---")
+    st.markdown("💡 *Get your free API key at [together.ai](https://api.together.ai/)*")
+
+TOGETHER_API_KEY = api_key_input.strip() if api_key_input else default_key
+ACTIVE_MODEL = selected_model
 
 # ── Session-state ────────────────────────────────────────────────────────────
 if "eval_log" not in st.session_state:
@@ -164,14 +198,38 @@ Context:
 Question:
 {prompt}
 """
-    t0   = time.perf_counter()
-    resp = client.chat.completions.create(
-        model    = "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
-        messages = [{"role": "user", "content": full_prompt}]
-    )
-    llm_latency = time.perf_counter() - t0
-    answer      = resp.choices[0].message.content.strip()
-    return answer, llm_latency
+    t0 = time.perf_counter()
+    if not TOGETHER_API_KEY:
+        return "⚠️ Error: Together AI API Key is missing. Please enter your API key in the sidebar.", 0.0
+
+    try:
+        client = together.Together(api_key=TOGETHER_API_KEY)
+        resp = client.chat.completions.create(
+            model=ACTIVE_MODEL,
+            messages=[{"role": "user", "content": full_prompt}]
+        )
+        llm_latency = time.perf_counter() - t0
+        answer = resp.choices[0].message.content.strip()
+        return answer, llm_latency
+    except together.APIStatusError as e:
+        llm_latency = time.perf_counter() - t0
+        if "402" in str(e) or "credit_limit" in str(e).lower():
+            err_msg = (
+                "⚠️ **Together AI Credit Limit Exceeded (Error 402)**\n\n"
+                "The current API key has run out of free credits.\n\n"
+                "**How to fix:**\n"
+                "1. Sign up for a free account at [together.ai](https://api.together.ai/).\n"
+                "2. Copy your new API key from Settings → API Keys.\n"
+                "3. Paste it in the **Sidebar ⚙️ Configuration** on the left."
+            )
+        elif "401" in str(e) or "auth" in str(e).lower():
+            err_msg = "⚠️ **Invalid API Key (Error 401)**. Please verify your Together AI API Key in the sidebar."
+        else:
+            err_msg = f"⚠️ **Together AI API Error**: {str(e)}"
+        return err_msg, llm_latency
+    except Exception as e:
+        llm_latency = time.perf_counter() - t0
+        return f"⚠️ **Generation Error**: {str(e)}", llm_latency
 
 # ══════════════════════════════════════════════════════════════════════════════
 # GENERATION METRICS (no reference needed)
@@ -344,7 +402,10 @@ if uploaded:
 
         data_df = data_df.dropna(how="all").dropna(axis=1, how="all")
         for c in data_df.columns:
-            data_df[c] = pd.to_numeric(data_df[c], errors="ignore")
+            try:
+                data_df[c] = pd.to_numeric(data_df[c])
+            except Exception:
+                pass
 
         dq_stats = data_quality_metrics(data_df_raw, data_df)
 
