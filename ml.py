@@ -19,19 +19,19 @@ st.set_page_config(page_title="AI Data Analyst using RAG", layout="wide")
 with st.sidebar:
     st.header("⚙️ Configuration")
     
-    default_key = os.environ.get("TOGETHER_API_KEY", "")
-    if not default_key:
+    # Retrieve API Key from environment variable or Streamlit secrets
+    env_key = os.environ.get("TOGETHER_API_KEY", "")
+    if not env_key:
         try:
-            default_key = st.secrets.get("TOGETHER_API_KEY", "")
+            env_key = st.secrets.get("TOGETHER_API_KEY", "")
         except Exception:
-            default_key = ""
-    if not default_key:
-        default_key = "0357f4e3014d4d9183adb943e8d0aa0fe146034c20a12e408bd6a0ee748d45fe"
+            env_key = ""
     
     api_key_input = st.text_input(
         "Together AI API Key",
-        value=default_key,
+        value=env_key,
         type="password",
+        placeholder="Paste your Together AI key here...",
         help="Get a free key at https://api.together.ai"
     )
     
@@ -47,10 +47,13 @@ with st.sidebar:
         index=0
     )
     
+    if not api_key_input:
+        st.info("ℹ️ Enter your Together API key to start querying.")
+    
     st.markdown("---")
     st.markdown("💡 *Get your free API key at [together.ai](https://api.together.ai/)*")
 
-TOGETHER_API_KEY = api_key_input.strip() if api_key_input else default_key
+TOGETHER_API_KEY = api_key_input.strip() if api_key_input else env_key
 ACTIVE_MODEL = selected_model
 
 # ── Session-state ────────────────────────────────────────────────────────────
