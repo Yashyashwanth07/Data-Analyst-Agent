@@ -214,7 +214,7 @@ Question:
 """
     t0 = time.perf_counter()
     if not TOGETHER_API_KEY:
-        return "⚠️ Error: Together AI API Key is missing. Please enter your API key in the sidebar.", 0.0
+        return "⚠️ Error: Together AI API Key is missing. Please enter your API key in the sidebar.", 0.0, False
 
     try:
         client = together.Together(api_key=TOGETHER_API_KEY)
@@ -224,7 +224,7 @@ Question:
         )
         llm_latency = time.perf_counter() - t0
         answer = resp.choices[0].message.content.strip()
-        return answer, llm_latency
+        return answer, llm_latency, True
     except together.APIStatusError as e:
         llm_latency = time.perf_counter() - t0
         if "402" in str(e) or "credit_limit" in str(e).lower():
@@ -240,10 +240,10 @@ Question:
             err_msg = "⚠️ **Invalid API Key (Error 401)**. Please verify your Together AI API Key in the sidebar."
         else:
             err_msg = f"⚠️ **Together AI API Error**: {str(e)}"
-        return err_msg, llm_latency
+        return err_msg, llm_latency, False
     except Exception as e:
         llm_latency = time.perf_counter() - t0
-        return f"⚠️ **Generation Error**: {str(e)}", llm_latency
+        return f"⚠️ **Generation Error**: {str(e)}", llm_latency, False
 
 # ══════════════════════════════════════════════════════════════════════════════
 # GENERATION METRICS (no reference needed)
@@ -614,17 +614,21 @@ if ask_clicked and query:
         # ── Tabular path ──────────────────────────────────────────────────────
         context = data_df.to_string(index=False)
         with st.spinner("Generating answer…"):
-            answer, llm_lat = llama_query(query, context)
-        fake_chunks = [context[:800]]
-        gen_m = generation_metrics(query, answer, fake_chunks, llm_lat)
-        ret_m = {
-            "faiss_latency_ms": 0,
-            "cos_sim_scores":   [],
-            "avg_cos_sim":      0,
-            "hit_rate":         0,
-            "chunk_diversity":  0,
-            "mrr":              0,
-        }
+            answer, llm_lat, is_success = llama_query(query, context)
+        if is_success:
+            fake_chunks = [context[:800]]
+            gen_m = generation_metrics(query, answer, fake_chunks, llm_lat)
+            ret_m = {
+                "faiss_latency_ms": 0,
+                "cos_sim_scores":   [],
+                "avg_cos_sim":      0,
+                "hit_rate":         0,
+                "chunk_diversity":  0,
+                "mrr":              0,
+            }
+        else:
+            gen_m = None
+            ret_m = None
 
     else:
         # ── RAG path ──────────────────────────────────────────────────────────
@@ -632,8 +636,11 @@ if ask_clicked and query:
             context, ret_m, retrieved = retrieve_top_k(
                 query, index, chunks, embeddings, k=3
             )
-            answer, llm_lat = llama_query(query, context)
-            gen_m = generation_metrics(query, answer, retrieved, llm_lat)
+            answer, llm_lat, is_success = llama_query(query, context)
+            if is_success:
+                gen_m = generation_metrics(query, answer, retrieved, llm_lat)
+            else:
+                gen_m = None
 
     # ── Add AI message to history ─────────────────────────────────────────────
     st.session_state.chat_history.append({
@@ -642,15 +649,16 @@ if ask_clicked and query:
         "metrics": gen_m,
     })
 
-    # ── Store in eval log ─────────────────────────────────────────────────────
-    st.session_state.eval_log.append({
-        "query":        query,
-        "answer":       answer,
-        "retrieval":    ret_m,
-        "generation":   gen_m,
-        "data_quality": dq_stats if dq_stats else {},
-        "chunking":     chunk_stats if chunk_stats else {},
-    })
+    # ── Store in eval log only on valid generation ────────────────────────────
+    if is_success and gen_m is not None:
+        st.session_state.eval_log.append({
+            "query":        query,
+            "answer":       answer,
+            "retrieval":    ret_m,
+            "generation":   gen_m,
+            "data_quality": dq_stats if dq_stats else {},
+            "chunking":     chunk_stats if chunk_stats else {},
+        })
 
     st.rerun()
 
