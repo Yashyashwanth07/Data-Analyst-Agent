@@ -15,25 +15,39 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 st.set_page_config(page_title="AI Data Analyst using RAG", layout="wide")
 
-# ── Sidebar: Model & API Configuration ────────────────────────────────────────
+# ── API & Model Configuration ────────────────────────────────────────────────
+# Automatically loads from Streamlit Cloud secrets or environment variables
+secrets_key = ""
+try:
+    if "TOGETHER_API_KEY" in st.secrets:
+        secrets_key = str(st.secrets["TOGETHER_API_KEY"]).strip()
+except Exception:
+    pass
+
+env_key = os.environ.get("TOGETHER_API_KEY", "").strip() or secrets_key
+
 with st.sidebar:
     st.header("⚙️ Configuration")
     
-    # Retrieve API Key from environment variable or Streamlit secrets
-    env_key = os.environ.get("TOGETHER_API_KEY", "")
-    if not env_key:
-        try:
-            env_key = st.secrets.get("TOGETHER_API_KEY", "")
-        except Exception:
-            env_key = ""
-    
-    api_key_input = st.text_input(
-        "Together AI API Key",
-        value=env_key,
-        type="password",
-        placeholder="Paste your Together AI key here...",
-        help="Get a free key at https://api.together.ai"
-    )
+    if secrets_key:
+        st.success("🔒 API Key loaded from `st.secrets`")
+        api_key_input = st.text_input(
+            "Override API Key (Optional)",
+            value="",
+            type="password",
+            placeholder="Leave blank to use st.secrets key",
+            help="Your API key is already configured in Streamlit Cloud Secrets."
+        )
+    else:
+        api_key_input = st.text_input(
+            "Together AI API Key",
+            value=env_key,
+            type="password",
+            placeholder="Paste your Together AI key here...",
+            help="You can also add TOGETHER_API_KEY in Streamlit Advanced Settings -> Secrets."
+        )
+        if not api_key_input:
+            st.info("ℹ️ Enter an API key above or configure `st.secrets`.")
     
     model_options = [
         "meta-llama/Llama-3.3-70B-Instruct-Turbo",
@@ -47,13 +61,10 @@ with st.sidebar:
         index=0
     )
     
-    if not api_key_input:
-        st.info("ℹ️ Enter your Together API key to start querying.")
-    
     st.markdown("---")
     st.markdown("💡 *Get your free API key at [together.ai](https://api.together.ai/)*")
 
-TOGETHER_API_KEY = api_key_input.strip() if api_key_input else env_key
+TOGETHER_API_KEY = api_key_input.strip() if api_key_input else (secrets_key or env_key)
 ACTIVE_MODEL = selected_model
 
 # ── Session-state ────────────────────────────────────────────────────────────
